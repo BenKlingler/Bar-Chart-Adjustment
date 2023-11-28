@@ -1,0 +1,140 @@
+Function FiscalYearAndQuarter(ByVal dateValue As Date) As String
+    Dim fiscalYear As Integer
+    Dim quarter As String
+    
+    ' Determine the fiscal quarter
+    Select Case Month(dateValue)
+        Case 1 To 3
+            quarter = "Q3"
+            fiscalYear = Year(dateValue)
+        Case 4 To 6
+            quarter = "Q4"
+            fiscalYear = Year(dateValue)
+        Case 7 To 9
+            quarter = "Q1"
+            fiscalYear = Year(dateValue) + 1
+        Case 10 To 12
+            quarter = "Q2"
+            fiscalYear = Year(dateValue) + 1
+    End Select
+    
+    FiscalYearAndQuarter = "FY" & fiscalYear & " " & quarter
+End Function
+
+Function CalculateColumnOffset(ByVal dateValue As Date, ByVal startFY As Integer, ByVal startColumn As Integer) As Integer
+    Dim fiscalYearOffset As Integer
+    Dim fiscalQuarterOffset As Integer
+    
+    ' Determine the fiscal year and offset
+    If Month(dateValue) >= 7 Then
+        fiscalYearOffset = Year(dateValue) - startFY + 1
+    Else
+        fiscalYearOffset = Year(dateValue) - startFY
+    End If
+    
+    ' Determine the fiscal quarter offset
+    Select Case Month(dateValue)
+        Case 1 To 3
+            fiscalQuarterOffset = 2 ' Q3
+        Case 4 To 6
+            fiscalQuarterOffset = 3 ' Q4
+        Case 7 To 9
+            fiscalQuarterOffset = 0 ' Q1
+        Case 10 To 12
+            fiscalQuarterOffset = 1 ' Q2
+    End Select
+    
+    ' Calculate the column offset from the start column
+    CalculateColumnOffset = ((fiscalYearOffset * 4) + fiscalQuarterOffset) + startColumn
+End Function
+
+Sub ReportAndPositionShapesUntilBlankRows()
+    Dim ws As Worksheet
+    
+    ' Set the worksheet to "Sheet1" of the Active Workbook
+    Set ws = ActiveWorkbook.Sheets("Sheet1")
+    
+    Const startColumn As Integer = 19 ' Column S corresponds to FY 2022 Q1
+    Const firstFiscalYear As Integer = 2022
+    Dim phaseColumns As Variant
+    phaseColumns = Array(Array("Design", "M", "N"), Array("Procurement", "O", "P"), Array("Construction", "Q", "R"))
+    
+    Dim currentRow As Integer: currentRow = 8 ' Start from row 8
+    Dim emptyRowCount As Integer: emptyRowCount = 0 ' Initialize the empty row counter
+    Dim templateShape As Shape, copiedShape As Shape
+    Dim startDate As Variant, endDate As Variant
+    Dim startColOffset As Integer, endColOffset As Integer
+    Dim phaseName As String
+    Dim startDateCol As Integer, endDateCol As Integer
+    Dim fiscalYearStartDate As Date: fiscalYearStartDate = DateSerial(firstFiscalYear, 7, 1) ' FY start date
+
+    ' Loop until 4 consecutive empty rows are found
+    Do While emptyRowCount < 4
+        ' Check if the entire row is empty
+        If Application.CountA(ws.Rows(currentRow)) = 0 Then
+            emptyRowCount = emptyRowCount + 1
+        Else
+            emptyRowCount = 0 ' Reset the empty row counter if a non-empty row is encountered
+            
+            ' Process each phase for the current row
+            For i = LBound(phaseColumns) To UBound(phaseColumns)
+                phaseName = phaseColumns(i)(0)
+                startDateCol = ws.Range(phaseColumns(i)(1) & "1").Column
+                endDateCol = ws.Range(phaseColumns(i)(2) & "1").Column
+
+                ' Attempt to set the template shape
+                On Error Resume Next
+                Set templateShape = ws.Shapes(phaseName)
+                On Error GoTo 0
+                
+                ' Proceed only if the shape exists
+                If Not templateShape Is Nothing Then
+                    ' Get start and end dates from the current row
+                    startDate = ws.Cells(currentRow, startDateCol).Value
+                    endDate = ws.Cells(currentRow, endDateCol).Value
+                    
+                    ' Check if the end date is present
+                    If IsDate(endDate) Then
+                        ' Calculate end column offset based on the end date
+                        endColOffset = CalculateColumnOffset(CDate(endDate), firstFiscalYear, startColumn)
+                        
+                        ' If the start date is missing or invalid, start from column S
+                        If Not IsDate(startDate) Then
+                            startColOffset = startColumn
+                        Else
+                            ' Calculate start column offset based on the start date
+                            startColOffset = CalculateColumnOffset(CDate(startDate), firstFiscalYear, startColumn)
+                            ' Adjust start column offset if before the fiscal year start
+                            If CDate(startDate) < fiscalYearStartDate Then
+                                startColOffset = startColumn
+                            End If
+                        End If
+
+                        ' Skip if the end date is before the fiscal year start date
+                        If CDate(endDate) < fiscalYearStartDate Then
+                            GoTo NextPhase
+                        End If
+                        
+                        ' Duplicate the shape and set its position
+                        Set copiedShape = templateShape.Duplicate
+                        With copiedShape
+                            .Top = ws.Rows(currentRow).Top
+                            .Left = ws.Cells(currentRow, startColOffset).Left
+                            .Width = ws.Cells(currentRow, endColOffset).Left - .Left + ws.Cells(currentRow, endColOffset).Width
+                            .Height = ws.Rows(currentRow).Height
+                            .Name = phaseName & "_" & currentRow
+                        End With
+                    End If
+                Else
+                    MsgBox "Shape named '" & phaseName & "' not found in row " & currentRow, vbExclamation
+                End If
+NextPhase:
+            Next i
+        End If
+        
+        ' Move to the next row
+        currentRow = currentRow + 1
+    Loop
+End Sub
+
+
